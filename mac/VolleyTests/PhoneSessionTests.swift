@@ -81,6 +81,33 @@ final class PhoneSessionTests: XCTestCase {
         XCTAssertEqual(session.openThread.map(\.state), [.failed])
     }
 
+    func testRetryResendsFailedSmsInPlaceOfTheFailedBubble() throws {
+        connect()
+        session.open(threadId: 1)
+        session.sendSms(to: "+1555", threadId: 1, body: "yo")
+        let first = try XCTUnwrap(transport.sentBodies(MsgType.smsSend, as: SmsSend.self).last)
+        deliver(MsgType.smsSent, SmsSent(requestId: first.requestId, ok: false, error: "no service"))
+        let failed = try XCTUnwrap(session.openThread.last)
+        XCTAssertTrue(failed.canRetry)
+        session.retrySend(id: failed.id)
+        let sends = transport.sentBodies(MsgType.smsSend, as: SmsSend.self)
+        XCTAssertEqual(sends.count, 2)
+        XCTAssertEqual(sends.last?.body, "yo")
+        XCTAssertNotEqual(sends.last?.requestId, first.requestId)
+        XCTAssertEqual(session.openThread.map(\.state), [.sending])
+        XCTAssertEqual(session.openThread.map(\.canRetry), [false])
+    }
+
+    func testRetryIgnoresMessagesThatDidNotFail() throws {
+        connect()
+        session.open(threadId: 1)
+        session.sendSms(to: "+1555", threadId: 1, body: "yo")
+        let pending = try XCTUnwrap(session.openThread.last)
+        XCTAssertFalse(pending.canRetry)
+        session.retrySend(id: pending.id)
+        XCTAssertEqual(transport.sentBodies(MsgType.smsSend, as: SmsSend.self).count, 1)
+    }
+
     func testSendWhileOfflineFails() {
         session.open(threadId: 1)
         session.sendSms(to: "+1555", threadId: 1, body: "yo")

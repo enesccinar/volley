@@ -142,30 +142,39 @@ private struct PhoneCard: View {
 
 private struct ConversationList: View {
     let session: PhoneSession
+    @State private var query = ""
 
     var body: some View {
-        if session.conversations.isEmpty {
-            Placeholder(text: session.isConnected ? "No messages today" : "No messages yet")
-        } else {
-            List(selection: Binding(get: { session.openThreadId }, set: { session.open(threadId: $0) })) {
-                ForEach(session.conversations) { c in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(alignment: .firstTextBaseline) {
-                            if c.isGroup {
-                                Image(systemName: "person.2.fill").font(.caption).foregroundStyle(.secondary)
-                                    .accessibilityLabel("Group")
-                            }
-                            Text(c.title).font(.headline).lineLimit(1)
-                            Spacer()
-                            Text(shortTime(c.lastDate)).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Text(c.lastBody).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                    .padding(.vertical, 4)
-                    .tag(c.threadId)
+        let results = FuzzySearch.search(query, in: session.conversations)
+        Group {
+            if session.conversations.isEmpty {
+                Placeholder(text: session.isConnected ? "No messages today" : "No messages yet")
+            } else if results.isEmpty {
+                let shown = query.trimmingCharacters(in: .whitespaces)
+                Placeholder(text: "No conversations match \u{201C}\(shown)\u{201D}")
+            } else {
+                List(selection: Binding(get: { session.openThreadId }, set: { session.open(threadId: $0) })) {
+                    ForEach(results) { c in row(c).tag(c.threadId) }
                 }
             }
         }
+        .searchable(text: $query, placement: .toolbar, prompt: "Search conversations")
+    }
+
+    private func row(_ c: ConversationSummary) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                if c.isGroup {
+                    Image(systemName: "person.2.fill").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("Group")
+                }
+                Text(c.title).font(.headline).lineLimit(1)
+                Spacer()
+                Text(shortTime(c.lastDate)).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(c.lastBody).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -350,6 +359,12 @@ private struct Bubble: View {
                     if item.state == .failed {
                         Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
                         Text(item.error.map { "Not sent: \($0)" } ?? "Not sent").foregroundStyle(.red)
+                        if item.canRetry {
+                            Button("Try Again") { session.retrySend(id: item.id) }
+                                .buttonStyle(.plain).fontWeight(.semibold).foregroundStyle(Color.coral)
+                                .disabled(!session.isConnected)
+                                .help(session.isConnected ? "Send this message again" : "Phone offline")
+                        }
                     } else {
                         Text(item.date, format: .dateTime.hour().minute())
                     }
@@ -357,6 +372,17 @@ private struct Bubble: View {
                 .font(.caption2).foregroundStyle(.secondary)
             }
             if !item.outgoing { Spacer(minLength: 60) }
+        }
+        .contextMenu {
+            if !item.body.isEmpty {
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(item.body, forType: .string)
+                }
+            }
+            if item.canRetry {
+                Button("Try Again") { session.retrySend(id: item.id) }.disabled(!session.isConnected)
+            }
         }
     }
 }

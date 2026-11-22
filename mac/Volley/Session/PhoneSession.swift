@@ -30,6 +30,8 @@ struct ChatItem: Identifiable, Equatable {
     var localImages: [URL] = []
     /// Why a send failed, as the phone reported it.
     var error: String?
+    /// A send from this Mac that can be tried again (see `PhoneSession.retrySend`).
+    var canRetry = false
 }
 
 /// A message sent from the Mac that the phone hasn't reported back yet. Kept in memory only.
@@ -231,6 +233,19 @@ final class PhoneSession: FileLink {
         guard !attachments.isEmpty else { return sendMms([]) }
         guard isConnected, let files else { return sendMms(nil) }
         files.attachForMms(attachments, then: sendMms)
+    }
+
+    /// Sends a failed message from this Mac again, text and photos; the new attempt replaces the failed bubble.
+    func retrySend(id: String) {
+        guard let deviceId = currentDevice?.id,
+              let i = pendingSends.firstIndex(where: { $0.requestId == id && $0.state == .failed }) else { return }
+        let failed = pendingSends.remove(at: i)
+        if let threadId = failed.threadId,
+           !failed.images.isEmpty || store.participantAddresses(deviceId: deviceId, threadId: threadId).count > 1 {
+            sendMessage(threadId: threadId, text: failed.body, attachments: failed.images)
+        } else {
+            sendSms(to: failed.address, threadId: failed.threadId, body: failed.body)
+        }
     }
 
     /// Asks the phone for a photo's thumbnail unless it's cached or already on its way.
@@ -548,7 +563,7 @@ final class PhoneSession: FileLink {
         }
         let pending = pendingSends.filter { $0.threadId == threadId }.map {
             ChatItem(id: $0.requestId, body: $0.body, date: $0.date, outgoing: true, state: $0.state,
-                     localImages: $0.images, error: $0.error)
+                     localImages: $0.images, error: $0.error, canRetry: $0.state == .failed)
         }
         // Stable sort: sends that never echo back (photos) stay where they were sent.
         openThread = (stored + pending).enumerated()

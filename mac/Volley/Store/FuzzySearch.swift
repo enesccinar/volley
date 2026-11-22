@@ -1,7 +1,7 @@
 import Foundation
 
-/// Typo-tolerant search for notifications: every query token must appear, in order but not necessarily
-/// contiguously, in the app name, title or text. Tighter and word-start matches rank higher.
+/// Typo-tolerant search for notifications and conversations: every query token must appear, in order but not
+/// necessarily contiguously, in one of the item's fields. Tighter and word-start matches rank higher.
 enum FuzzySearch {
     private static let consecutiveBonus = 5
     private static let wordStartBonus = 8
@@ -20,18 +20,29 @@ enum FuzzySearch {
 
     /// Items matching every whitespace-separated token, best first, then newest first. Blank query → `items`.
     static func search(_ query: String, in items: [StoredNotification]) -> [StoredNotification] {
+        search(query, in: items, fields: { [$0.appName, $0.title, $0.text] }, date: \.postedAt)
+    }
+
+    /// Conversations matching by name, number, group members or last message, best first, then newest first.
+    static func search(_ query: String, in items: [ConversationSummary]) -> [ConversationSummary] {
+        search(query, in: items, fields: { [$0.title, $0.address, $0.name ?? ""] + $0.participants + [$0.lastBody] },
+               date: \.lastDate)
+    }
+
+    private static func search<T>(_ query: String, in items: [T], fields: (T) -> [String],
+                                  date: KeyPath<T, Date>) -> [T] {
         let tokens = query.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !tokens.isEmpty else { return items }
-        let scored: [(StoredNotification, Int)] = items.compactMap { item in
+        let scored: [(T, Int)] = items.compactMap { item in
+            let values = fields(item)
             var total = 0
             for token in tokens {
-                let best = [item.appName, item.title, item.text].compactMap { score(token, in: $0) }.max()
-                guard let best else { return nil }
+                guard let best = values.compactMap({ score(token, in: $0) }).max() else { return nil }
                 total += best
             }
             return (item, total)
         }
-        return scored.sorted { a, b in a.1 != b.1 ? a.1 > b.1 : a.0.postedAt > b.0.postedAt }.map(\.0)
+        return scored.sorted { a, b in a.1 != b.1 ? a.1 > b.1 : a.0[keyPath: date] > b.0[keyPath: date] }.map(\.0)
     }
 
     private static func align(_ q: [Character], in f: [Character], from start: Int) -> Int? {

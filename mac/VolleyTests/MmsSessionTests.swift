@@ -142,6 +142,23 @@ final class MmsSessionTests: XCTestCase {
         XCTAssertEqual(session.openThread.last?.state, .failed)
     }
 
+    func testRetryAfterFailedPhotoUploadsAgainAndSendsToTheGroup() throws {
+        connect()
+        groupThread()
+        session.open(threadId: 4)
+        session.sendMessage(threadId: 4, text: "look", attachments: [try photo()])
+        _ = try acceptUpload(ok: false)
+        let failed = try XCTUnwrap(session.openThread.last)
+        XCTAssertTrue(failed.canRetry)
+        session.retrySend(id: failed.id)
+        XCTAssertEqual(transport.sentBodies(MsgType.mmsAttach, as: MmsAttach.self).count, 2)
+        _ = try acceptUpload()
+        let req = try XCTUnwrap(transport.sentBodies(MsgType.mmsSend, as: MmsSend.self).single)
+        XCTAssertEqual(Set(req.addresses), ["+1555", "+1777"])
+        XCTAssertEqual(req.text, "look")
+        XCTAssertEqual(session.openThread.filter { $0.outgoing }.map(\.state), [.sending])
+    }
+
     func testGroupBubblesCarrySenderAndAttachments() {
         connect()
         let pic = Attachment(partId: 70, mime: "image/jpeg", size: 9)

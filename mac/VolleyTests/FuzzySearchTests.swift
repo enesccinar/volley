@@ -48,4 +48,30 @@ final class FuzzySearchTests: XCTestCase {
         let items = [note("b", at: 1), note("a", at: 2)]
         XCTAssertEqual(FuzzySearch.search("   ", in: items), items)
     }
+
+    private func convo(_ id: Int64, name: String? = nil, address: String = "+1555", body: String = "",
+                       members: [String] = [], at secs: Double = 0) -> ConversationSummary {
+        ConversationSummary(threadId: id, address: address, name: name, lastBody: body,
+                            lastDate: Date(timeIntervalSince1970: secs), participants: members)
+    }
+
+    func testConversationsMatchByNameNumberAndBody() {
+        let items = [
+            convo(1, name: "Ana", address: "+1555", body: "see you soon"),
+            convo(2, name: "Bob", address: "+1777", body: "lunch tomorrow?")
+        ]
+        XCTAssertEqual(FuzzySearch.search("ana", in: items).map(\.threadId), [1])
+        XCTAssertEqual(FuzzySearch.search("1777", in: items).map(\.threadId), [2])
+        XCTAssertEqual(FuzzySearch.search("lnch", in: items).map(\.threadId), [2])
+    }
+
+    func testGroupConversationMatchesAnyMember() {
+        let items = [convo(1, members: ["Ana", "Bob", "Cleo", "Dev"]), convo(2, name: "Eve")]
+        XCTAssertEqual(FuzzySearch.search("cleo", in: items).map(\.threadId), [1])
+    }
+
+    func testConversationTiesGoNewestFirst() {
+        let items = [convo(1, name: "Ana", at: 1), convo(2, name: "Ana", at: 2)]
+        XCTAssertEqual(FuzzySearch.search("ana", in: items).map(\.threadId), [2, 1])
+    }
 }
